@@ -36,7 +36,7 @@
             // Get speed slider value and update ui text
             document.getElementById("speedslider").addEventListener("input", (event) => {
                 speed = event.srcElement.value;
-                changeElementContent("speed", speed);
+                changeElementContent("speed", speed*50);
                 // If currently active clear current timer and schedule with new time
                 if (active) {
                     clearTimeout(timer);
@@ -217,7 +217,7 @@
 </head>
 <body>
     <div class="page">
-        <div>Speed: <span id="speed">10</span></div>
+        <div>Speed: <span id="speed">500</span>ms</div>
         <input type="range" min="1" max="200" value="10" class="slider" id="speedslider">
 
         <div><button id="statustogglebutton" disabled>Start</button></div>
