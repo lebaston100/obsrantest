@@ -34,7 +34,7 @@
         // Run once per page load
         function init() {
             // Get speed slider value and update ui text
-            document.getElementById("speedslider").addEventListener("input", (event) => {
+            document.getElementById("speedslider").addEventListener("input", event => {
                 speed = event.srcElement.value;
                 changeElementContent("speed", speed*50);
                 // If currently active clear current timer and schedule with new time
@@ -105,7 +105,7 @@
         // The flashing pulse text
         function setPulseText() {
             pulsetext.innerText = "GO!";
-            setTimeout(()=> { pulsetext.innerText = "Sleeping"; }, speed*5);
+            setTimeout(() => { pulsetext.innerText = "Sleeping"; }, speed*5);
         }
 
         // Generate the list of selectable actions
@@ -120,7 +120,7 @@
                 i.setAttribute("id", `as-${count}`);
                 i.setAttribute("checked", true);
                 i.setAttribute("data-func", obj);
-                i.addEventListener("change", (event)=>{ toggleAction(event.target) });
+                i.addEventListener("change", event => { toggleAction(event.target) });
 
                 let l = document.createElement("label");
                 l.setAttribute("for", `as-${count}`);
@@ -137,7 +137,7 @@
         function toggleAction(event) {
             const funcname = event.getAttribute("data-func")
             actions[funcname].enabled = event.checked;
-            enabled = Object.entries(actions).filter(y=>y[1].enabled).map(x=>x[0]);
+            enabled = Object.entries(actions).filter(y => y[1].enabled).map(x => x[0]);
         }
 
         // Defines all the actions that can be run
@@ -211,7 +211,7 @@
             return Math.floor(Math.random() * Math.floor(actions.length));
         }
         function getRanArrayEntry(arr) {
-            return arr[Math.floor(Math.random()*arr.length)];
+            return arr[Math.floor(Math.random() * arr.length)];
         }
     </script>
 </head>
