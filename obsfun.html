@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OBS Fun</title>
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/fontawesome.min.css">
+    <style>
+        .page {
+            width: 60%
+        }
+        .slider {
+            width: 50%;
+            background: #d3d3d3;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/obs-websocket-js@4.0.2/dist/obs-websocket.min.js" integrity="sha256-oA5ASMB4zvyMZSk0DAIAzRoSU3Dzk1ZAH48M+/7a5oY=" crossorigin="anonymous"></script>
+    <script>
+        window.addEventListener("DOMContentLoaded", init, false);
+        let serverip = "127.0.0.1:4444";    // Change the server IP/port here
+        let password = "mypassword";        // Set password here
+
+        let speed = 10;
+        let timer = null;
+        let active = false;
+        let enabled = [];
+        let statustogglebutton = null;
+        let pulsetext = null;
+
+        let SceneList = [];
+
+        const obs = new OBSWebSocket();
+
+        // Run once per page load
+        function init() {
+            // Get speed slider value and update ui text
+            document.getElementById("speedslider").addEventListener("input", (event) => {
+                speed = event.srcElement.value;
+                changeElementContent("speed", speed);
+                // If currently active clear current timer and schedule with new time
+                if (active) {
+                    clearTimeout(timer);
+                    timer = setTimeout(pulse, speed*50);
+                }
+            });
+
+            statustogglebutton = document.getElementById("statustogglebutton");
+            statustogglebutton.addEventListener("click", toggleEnable);
+            pulsetext = document.getElementById("pulsetext");
+            pulsetext.innerText = "Sleeping";
+
+            // Start connection to obs
+            connect();
+            // Create the actions frontend list
+            createActionsSelectorList();
+        }
+
+        // Init obs connect
+        function connect() {
+            console.log("Trying to connect to obs...");
+            obs.connect({ address: serverip, password: password });
+        }
+        
+        // When obs connection is open
+        obs.on("ConnectionOpened", () => {
+            console.log("OBS Connection opened");
+            // Activate start button
+            statustogglebutton.disabled = false;
+        });
+
+        // When obs connection is closed
+        obs.on("ConnectionClosed", () => {
+            console.log("Connection Closed");
+            clearTimeout(timer);
+            setTimeout(connect, 2000);
+        });
+
+        obs.on("error", err => {
+            console.log("Websocket error:", err);
+        });
+
+        // When an event should happen
+        function pulse() {
+            setPulseText();
+
+            const randomSelection = getRanArrayEntry(enabled);
+            console.log(`Running ${ randomSelection }`);
+
+            // Run function
+            actions[randomSelection].run();
+
+            // If enabled then queue the next event
+            if (active) timer = setTimeout(pulse, speed*50);
+        }
+
+        // Toggle the current status
+        function toggleEnable() {
+            active = !active;                               // Invert run status
+            console.log(`toggleEnable switched 'active' to ${active}`);
+            statustogglebutton.innerText = active ? "Stop" : "Start" ;
+            if (!active && timer) clearTimeout(timer);      // If disabled and timer is active then abort timer
+            if (active) timer = setTimeout(pulse, speed*50);
+        }
+
+        // The flashing pulse text
+        function setPulseText() {
+            pulsetext.innerText = "GO!";
+            setTimeout(()=> { pulsetext.innerText = "Sleeping"; }, speed*5);
+        }
+
+        // Generate the list of selectable actions
+        function createActionsSelectorList() {
+            let div = document.getElementById("actionselect");
+            let count = 0;
+
+            for (const obj of Object.keys(actions)) {
+                let span = document.createElement("div");
+                let i = document.createElement("input");
+                i.setAttribute("type", "checkbox");
+                i.setAttribute("id", `as-${count}`);
+                i.setAttribute("checked", true);
+                i.setAttribute("data-func", obj);
+                i.addEventListener("change", (event)=>{ toggleAction(event.target) });
+
+                let l = document.createElement("label");
+                l.setAttribute("for", `as-${count}`);
+                l.appendChild(document.createTextNode(actions[obj].desc));
+                
+                span.appendChild(i);
+                span.appendChild(l);
+                div.appendChild(span);
+                count++;
+            };
+        }
+
+        // Handle the click on any of the checkboxes
+        function toggleAction(event) {
+            const funcname = event.getAttribute("data-func")
+            actions[funcname].enabled = event.checked;
+            enabled = Object.entries(actions).filter(y=>y[1].enabled).map(x=>x[0]);
+        }
+
+        // Defines all the actions that can be run
+        let actions = {
+            func1: {
+                desc: "SwitchScenes",
+                enabled: true,
+                run: () => {
+                    obs.send("GetSceneList")
+                    .then(data => getRanArrayEntry(Object.entries(data.scenes).map(x => x[1].name).filter(y => y!==data.currentScene)))
+                    .then(scene => setLastLogText(`Switched to scene "${ scene }"`, scene))
+                    .then(scene => obs.send("SetCurrentScene", {"scene-name": scene}))
+                    .catch(e => console.log(e));
+                }
+            },
+            func2: {
+                desc: "Change Preview",
+                enabled: true,
+                run: () => {
+                    obs.send("GetStudioModeStatus").then(data => data.studioMode ? obs.send("GetSceneList") : Promise.reject("Studio Mode not enabled, doing nothing"))
+                    .then(data => getRanArrayEntry(Object.entries(data.scenes).map(x => x[1].name).filter(y => y!==data.currentScene)))
+                    .then(scene => setLastLogText(`Switched preview to scene "${ scene }"`, scene))
+                    .then(scene => obs.send("SetPreviewScene", {"scene-name": scene}))
+                    .catch(e => console.log(e));
+                }
+            },
+            func3: {
+                desc: "Transition to preview",
+                enabled: true,
+                run: () => {
+                    obs.send("GetStudioModeStatus").then(data => data.studioMode ? obs.send("TransitionToProgram") : Promise.reject("Studio Mode not enabled, doing nothing"))
+                    .then(data => setLastLogText(`Transitioning to program`, data))
+                    .catch(e => console.log(e));
+                }
+            },
+            func4: {
+                desc: "Toggle scene item visibility",
+                enabled: true,
+                run: () => {
+                    obs.send("GetCurrentScene")
+                    .then(scenes => getRanArrayEntry(scenes.sources))
+                    .then(source => setLastLogText(`Set source "${ source.name }" to ${ source.render ? "visible" : "invisible" }`, source))
+                    .then(source => obs.send("SetSceneItemRender", {"source": source.name, "render": !source.render}))
+                    .catch(e => console.log(e));
+                }
+            },
+            func5: {
+                desc: "Switch transition",
+                enabled: true,
+                run: () => {
+                    obs.send("GetTransitionList")
+                    .then(transitions => getRanArrayEntry(transitions.transitions))
+                    .then(transition => setLastLogText(`Set transition to ${ transition.name }`, transition))
+                    .then(transition => obs.send("SetCurrentTransition", {"transition-name": transition.name}))
+                    .catch(e => console.log(e));
+                }
+            }
+        }
+        enabled = Object.keys(actions);
+
+        // General utils
+        function changeElementContent(id, newContent) {
+            document.getElementById(id).innerHTML = newContent;
+        }
+        function setLastLogText(text, ret) {
+            changeElementContent("lastlog", text);
+            console.log(text);
+            return ret;
+        }
+        function getRandomInt() {
+            return Math.floor(Math.random() * Math.floor(actions.length));
+        }
+        function getRanArrayEntry(arr) {
+            return arr[Math.floor(Math.random()*arr.length)];
+        }
+    </script>
+</head>
+<body>
+    <div class="page">
+        <div>Speed: <span id="speed">10</span></div>
+        <input type="range" min="1" max="200" value="10" class="slider" id="speedslider">
+
+        <div><button id="statustogglebutton" disabled>Start</button></div>
+        <div>Status: <span id="pulsetext"></span></div>
+        <div>Last ran action: <span id="lastlog"></span></div>
+
+        <div>Actions:</div>
+        <div id="actionselect">
+        </div>
+
+        <div>For a more detailed log check the dev tools console.</div>
+
+    </div>
+</body>
+</html>
