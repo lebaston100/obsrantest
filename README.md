@@ -12,7 +12,7 @@ Right now it can:
 
 ### Requirements
 
-- The [obs-websocket plugin](https://github.com/Palakis/obs-websocket/releases) (Version >= 4.8.0)
+- The [obs-websocket plugin](https://github.com/Palakis/obs-websocket/releases/tag/4.9.1) (only version 4.9.1)
 - An internet connection
 
 ### Setup obs-websocket
