@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>OBS Fun</title>
-	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/fontawesome.min.css">
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.0/css/fontawesome.min.css" integrity="sha512-RvQxwf+3zJuNwl4e0sZjQeX7kUa3o82bDETpgVCH2RiwYSZVDdFJ7N/woNigN/ldyOOoKw8584jM4plQdt8bhA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <style>
         .page {
             width: 60%
@@ -14,11 +14,12 @@
             background: #d3d3d3;
         }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/obs-websocket-js@4.0.2/dist/obs-websocket.min.js" integrity="sha256-oA5ASMB4zvyMZSk0DAIAzRoSU3Dzk1ZAH48M+/7a5oY=" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/obs-websocket-js@5.0.1/dist/obs-ws.min.js" integrity="sha256-UbkntZrYTokZf8tldcF9nmOn5CNgcmDP+MNsUcKUpEE=" crossorigin="anonymous"></script>
+    <!-- <script src="obs-ws.min.js"></script> -->
     <script>
         window.addEventListener("DOMContentLoaded", init, false);
-        let serverip = "127.0.0.1:4444";    // Change the server IP/port here
-        let password = "mypassword";        // Set password here
+        const obsHost = "127.0.0.1:4455";    // Change the server IP/port here
+        const obsPassword = "secret-password";    // Set password here
 
         let speed = 10;
         let timer = null;
@@ -32,7 +33,7 @@
         const obs = new OBSWebSocket();
 
         // Run once per page load
-        function init() {
+        async function init() {
             // Get speed slider value and update ui text
             document.getElementById("speedslider").addEventListener("input", event => {
                 speed = event.srcElement.value;
@@ -50,20 +51,28 @@
             pulsetext.innerText = "Sleeping";
 
             // Start connection to obs
-            connect();
-            // Create the actions frontend list
-            createActionsSelectorList();
+            await attemptConnection();
         }
 
-        // Init obs connect
-        function connect() {
-            console.log("Trying to connect to obs...");
-            obs.connect({ address: serverip, password: password });
+        //Handle websocket connection stuff
+        async function attemptConnection() {
+            // Try to connect to obs
+            try {
+                const {
+                    obsWebSocketVersion,
+                    negotiatedRpcVersion
+                } = await obs.connect(`ws://${obsHost}`, obsPassword, {rpcVersion: 1});
+                console.log(`Connected to obs-websocket ${obsWebSocketVersion} (using RPC ${negotiatedRpcVersion})`);
+            } catch (error) {
+                console.error("Failed to connect", error.code, error.message);                
+            }
         }
-        
+
         // When obs connection is open
-        obs.on("ConnectionOpened", () => {
-            console.log("OBS Connection opened");
+        obs.on("Identified", () => {
+            console.log("OBS Connection established sucessfully");
+            // Create the actions frontend list
+            createActionsSelectorList();
             // Activate start button
             statustogglebutton.disabled = false;
         });
@@ -72,11 +81,7 @@
         obs.on("ConnectionClosed", () => {
             console.log("Connection Closed");
             clearTimeout(timer);
-            setTimeout(connect, 2000);
-        });
-
-        obs.on("error", err => {
-            console.log("Websocket error:", err);
+            setTimeout(attemptConnection, 2000);
         });
 
         // When an event should happen
@@ -84,7 +89,7 @@
             setPulseText();
 
             const randomSelection = getRanArrayEntry(enabled);
-            console.log(`Running ${ randomSelection }`);
+            console.log(`Running ${ randomSelection } aka "${ actions[randomSelection].desc }"`);
 
             // Run function
             actions[randomSelection].run();
@@ -104,7 +109,7 @@
 
         // The flashing pulse text
         function setPulseText() {
-            pulsetext.innerText = "GO!";
+            pulsetext.innerText = "Running!";
             setTimeout(() => { pulsetext.innerText = "Sleeping"; }, speed*5);
         }
 
@@ -146,53 +151,69 @@
                 desc: "SwitchScenes",
                 enabled: true,
                 run: () => {
-                    obs.send("GetSceneList")
-                    .then(data => getRanArrayEntry(Object.entries(data.scenes).map(x => x[1].name).filter(y => y!==data.currentScene)))
+                    obs.call("GetSceneList")
+                    .then(data => getRanArrayEntry(Object.entries(data.scenes).map(x => x[1].sceneName).filter(y => y!==data.currentProgramSceneName)))
                     .then(scene => setLastLogText(`Switched to scene "${ scene }"`, scene))
-                    .then(scene => obs.send("SetCurrentScene", {"scene-name": scene}))
-                    .catch(e => console.log(e));
+                    .then(scene => obs.call("SetCurrentProgramScene", {"sceneName": scene}))
+                    .catch(console.error);
                 }
             },
             func2: {
                 desc: "Change Preview",
                 enabled: true,
                 run: () => {
-                    obs.send("GetStudioModeStatus").then(data => data.studioMode ? obs.send("GetSceneList") : Promise.reject("Studio Mode not enabled, doing nothing"))
-                    .then(data => getRanArrayEntry(Object.entries(data.scenes).map(x => x[1].name).filter(y => y!==data.currentScene)))
+                    obs.call("GetStudioModeEnabled").then(data => data.studioModeEnabled ? obs.call("GetSceneList") : Promise.reject("Studio Mode not enabled, doing nothing"))
+                    .then(data => getRanArrayEntry(Object.entries(data.scenes).map(x => x[1].sceneName).filter(y => y!==data.currentProgramSceneName)))
                     .then(scene => setLastLogText(`Switched preview to scene "${ scene }"`, scene))
-                    .then(scene => obs.send("SetPreviewScene", {"scene-name": scene}))
-                    .catch(e => console.log(e));
+                    .then(scene => obs.call("SetCurrentPreviewScene", {"sceneName": scene}))
+                    .catch(console.error);
                 }
             },
             func3: {
-                desc: "Transition to preview",
+                desc: "Transition preview to to program",
                 enabled: true,
                 run: () => {
-                    obs.send("GetStudioModeStatus").then(data => data.studioMode ? obs.send("TransitionToProgram") : Promise.reject("Studio Mode not enabled, doing nothing"))
+                    obs.call("GetStudioModeEnabled").then(data => data.studioModeEnabled ? obs.call("TriggerStudioModeTransition") : Promise.reject("Studio Mode not enabled, doing nothing"))
                     .then(data => setLastLogText(`Transitioning to program`, data))
-                    .catch(e => console.log(e));
+                    .catch(console.error);
                 }
             },
             func4: {
                 desc: "Toggle scene item visibility",
                 enabled: true,
-                run: () => {
-                    obs.send("GetCurrentScene")
-                    .then(scenes => getRanArrayEntry(scenes.sources))
-                    .then(source => setLastLogText(`Set source "${ source.name }" to ${ source.render ? "visible" : "invisible" }`, source))
-                    .then(source => obs.send("SetSceneItemRender", {"source": source.name, "render": !source.render}))
-                    .catch(e => console.log(e));
+                run: async () => {
+                    // Written in "new style" since i failed to bring the currentProgramSceneName all the wait though the promise chain to the bottom
+                    try {
+                        const { currentProgramSceneName } = await obs.call("GetCurrentProgramScene");
+                        const { sceneItems } = await obs.call("GetSceneItemList", {"sceneName": currentProgramSceneName});
+                        const randomSceneItem = getRanArrayEntry(sceneItems);
+                        await obs.call("SetSceneItemEnabled", {"sceneName": currentProgramSceneName,"sceneItemId": randomSceneItem.sceneItemId, "sceneItemEnabled": !randomSceneItem.sceneItemEnabled})
+                        setLastLogText(`Set source "${ randomSceneItem.sourceName }" to ${ randomSceneItem.sceneItemEnabled ? "visible" : "invisible" }`);
+                    } catch (e) {
+                        console.error(e);
+                    }
                 }
             },
             func5: {
                 desc: "Switch transition",
                 enabled: true,
                 run: () => {
-                    obs.send("GetTransitionList")
+                    obs.call("GetSceneTransitionList")
                     .then(transitions => getRanArrayEntry(transitions.transitions))
-                    .then(transition => setLastLogText(`Set transition to ${ transition.name }`, transition))
-                    .then(transition => obs.send("SetCurrentTransition", {"transition-name": transition.name}))
-                    .catch(e => console.log(e));
+                    .then(transition => setLastLogText(`Set transition to ${ transition.transitionName }`, transition))
+                    .then(transition => obs.call("SetCurrentSceneTransition", {"transitionName": transition.transitionName}))
+                    .catch(console.error);
+                }
+            },
+            func6: {
+                desc: "Toggle Input Mute",
+                enabled: true,
+                run: async () => {         
+                    obs.call("GetInputList")
+                    .then(inputs => getRanArrayEntry(inputs.inputs))
+                    .then(input => setLastLogText(`Toggling mute for input ${ input.inputName }`, input))
+                    .then(input => obs.call("ToggleInputMute", {"inputName": input.inputName}))
+                    .catch(console.error);
                 }
             }
         }
@@ -200,9 +221,9 @@
 
         // General utils
         function changeElementContent(id, newContent) {
-            document.getElementById(id).innerHTML = newContent;
+            document.getElementById(id).innerText = newContent;
         }
-        function setLastLogText(text, ret) {
+        function setLastLogText(text, ret = undefined) {
             changeElementContent("lastlog", text);
             console.log(text);
             return ret;
